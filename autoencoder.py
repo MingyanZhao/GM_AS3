@@ -31,13 +31,13 @@
 """
 
 from __future__ import print_function
-
+import matplotlib.pyplot as plt
 import os
 import sys
 import timeit
 
 import numpy
-
+import noise
 import theano
 import theano.tensor as T
 from theano.tensor.shared_randomstreams import RandomStreams
@@ -85,7 +85,8 @@ class dA(object):
         n_hidden=500,
         W=None,
         bhid=None,
-        bvis=None
+        bvis=None,
+        noise = 'zero'
     ):
         """
         Initialize the dA class by specifying the number of visible units (the
@@ -135,7 +136,7 @@ class dA(object):
         """
         self.n_visible = n_visible
         self.n_hidden = n_hidden
-
+        self.noise_type = noise
         # create a Theano random generator that gives symbolic random values
         if not theano_rng:
             theano_rng = RandomStreams(numpy_rng.randint(2 ** 30))
@@ -216,9 +217,16 @@ class dA(object):
                 correctly as it only support float32 for now.
 
         """
-        return self.theano_rng.binomial(size=input.shape, n=1,
-                                        p=1 - corruption_level,
-                                        dtype=theano.config.floatX) * input
+
+        if self.noise_type == 'zero':
+            return self.theano_rng.binomial(size=input.shape, n=1,
+                                            p=1 - corruption_level,
+                                            dtype=theano.config.floatX) * input
+        else:
+            return noise.add_gaussian(input = input, noise_level = 1)
+
+
+
 
     def get_hidden_values(self, input):
         """ Computes the values of the hidden layer """
@@ -235,10 +243,13 @@ class dA(object):
         """ This function computes the cost and the updates for one trainng
         step of the dA """
 
+        #print(self.x[0,:,:].eval())
+
         tilde_x = self.get_corrupted_input(self.x, corruption_level)
         y = self.get_hidden_values(tilde_x)
         #y = self.get_hidden_values(self.x)
         z = self.get_reconstructed_input(y)
+
         # note : we sum over the size of a datapoint; if we are using
         #        minibatches, L will be a vector, with one entry per
         #        example in minibatch
@@ -264,7 +275,7 @@ class dA(object):
 
 def test_dA(learning_rate=0.1, training_epochs=15,
             letter = 'A',
-            batch_size=20, output_folder='dA_plots'):
+            batch_size=20, output_folder='dA_plots', hiddensize = 500, draw_pic_switch = True, noise = 'zero'):
 
     """
     This demo is tested on MNIST
@@ -280,10 +291,15 @@ def test_dA(learning_rate=0.1, training_epochs=15,
     :param dataset: path to the picked dataset
 
     """
+
+    # record final cost of no corruption model(costs[0]) and corruption model (costs[1])
+    costs = []
+
     dataset='mnist.pkl.gz'
     datasets = load_data(dataset, letter)
 
     train_set_x, train_set_y = datasets[0]
+
 
     # compute number of minibatches for training, validation and testing
     n_train_batches = train_set_x.get_value(borrow=True).shape[0] // batch_size
@@ -310,7 +326,8 @@ def test_dA(learning_rate=0.1, training_epochs=15,
         theano_rng=theano_rng,
         input=x,
         n_visible=28 * 28,
-        n_hidden=500
+        n_hidden=hiddensize,
+        noise= noise
     )
 
     cost, updates = da.get_cost_updates(
@@ -333,12 +350,6 @@ def test_dA(learning_rate=0.1, training_epochs=15,
     # TRAINING #
     ############
 
-    image = Image.fromarray(
-        tile_raster_images(X = (train_set_x.get_value(borrow=True) * 500),
-                           img_shape=(28, 28), tile_shape=(10, 10),
-                           tile_spacing=(1, 1)))
-    image.save('test.png')
-
     # go through training epochs
     for epoch in range(training_epochs):
         # go through trainng set
@@ -348,6 +359,8 @@ def test_dA(learning_rate=0.1, training_epochs=15,
 
         print('Training epoch %d, cost ' % epoch, numpy.mean(c))
 
+    costs.append(numpy.mean(c))
+
     end_time = timeit.default_timer()
 
     training_time = (end_time - start_time)
@@ -356,20 +369,23 @@ def test_dA(learning_rate=0.1, training_epochs=15,
            os.path.split(__file__)[1] +
            ' ran for %.2fm' % ((training_time) / 60.)), file=sys.stderr)
 
-    image = Image.fromarray(
-        tile_raster_images(X=da.W.get_value(borrow=True).T,
-                           img_shape=(28, 28), tile_shape=(10, 10),
-                           tile_spacing=(1, 1)))
-    image.save(letter + 'filters_corruption_0.png')
+    if(draw_pic_switch == True):
 
-    drawimg(da, train_set_x, 'train', letter)
+        filetile = letter + '_' + da.noise_type + '_'
 
-    valid_x, valid_y = datasets[1]
-    drawimg(da, valid_x, 'valid', letter)
+        image = Image.fromarray(
+            tile_raster_images(X=da.W.get_value(borrow=True).T,
+                               img_shape=(28, 28), tile_shape=(10, 10),
+                               tile_spacing=(1, 1)))
+        image.save(filetile + 'filters_corruption_0.png')
 
-    test_x, test_y = datasets[2]
-    drawimg(da, test_x, 'test', letter)
+        drawimg(da, train_set_x, 'train', filetile)
 
+        valid_x, valid_y = datasets[1]
+        drawimg(da, valid_x, 'valid', filetile)
+
+        test_x, test_y = datasets[2]
+        drawimg(da, test_x, 'test', filetile)
 
     # start-snippet-3
     #####################################
@@ -384,7 +400,8 @@ def test_dA(learning_rate=0.1, training_epochs=15,
         theano_rng=theano_rng,
         input=x,
         n_visible=28 * 28,
-        n_hidden=500
+        n_hidden=hiddensize,
+        noise=noise
     )
 
     cost, updates = da.get_cost_updates(
@@ -416,6 +433,8 @@ def test_dA(learning_rate=0.1, training_epochs=15,
 
         print('Training epoch %d, cost ' % epoch, numpy.mean(c))
 
+    costs.append(numpy.mean(c))
+
     end_time = timeit.default_timer()
 
     training_time = (end_time - start_time)
@@ -425,26 +444,35 @@ def test_dA(learning_rate=0.1, training_epochs=15,
            ' ran for %.2fm' % (training_time / 60.)), file=sys.stderr)
     # end-snippet-3
 
-    # start-snippet-4
-    image = Image.fromarray(tile_raster_images(
-        X=da.W.get_value(borrow=True).T,
-        img_shape=(28, 28), tile_shape=(10, 10),
-        tile_spacing=(1, 1)))
-    image.save(letter + 'filters_corruption_30.png')
-    # end-snippet-4
+    if draw_pic_switch:
+        # start-snippet-4
+        filetile = letter + '_' + da.noise_type + '_'
 
-    drawimg(da, train_set_x, 'corrupt_train',letter)
+        # draw picture of hidden layer
+        image = Image.fromarray(tile_raster_images(
+            X=da.W.get_value(borrow=True).T,
+            img_shape=(28, 28), tile_shape=(10, 10),
+            tile_spacing=(1, 1)))
+        image.save(filetile + 'filters_corruption_30.png')
+        # end-snippet-4
 
-    valid_x, valid_y = datasets[1]
-    drawimg(da, valid_x, 'corrupt_valid',letter)
+        # draw original and reconstructed pic for train set
+        drawimg(da, train_set_x, 'corrupt_train',filetile)
 
-    test_x, test_y = datasets[2]
-    drawimg(da, test_x, 'corrupt_test', letter)
+        # draw original and reconstructed pic for cross validation set
+        valid_x, valid_y = datasets[1]
+        drawimg(da, valid_x, 'corrupt_valid',filetile)
+
+        # draw original and reconstructed pic for test set
+        test_x, test_y = datasets[2]
+        drawimg(da, test_x, 'corrupt_test', filetile)
 
     os.chdir('../')
 
+    return costs
 
-def drawimg(da, set, filename, letter):
+
+def drawimg(da, set, dataClass, letter):
     y = da.get_hidden_values(set.get_value(borrow=True))
     z = da.get_reconstructed_input(y)
 
@@ -452,14 +480,45 @@ def drawimg(da, set, filename, letter):
         tile_raster_images(X=(set.get_value(borrow=True) * 500),
                            img_shape=(28, 28), tile_shape=(10, 10),
                            tile_spacing=(1, 1)))
-    image.save(filename + '_' + letter + '.png')
+    image.save(dataClass + '_' + letter + '.png')
     image = Image.fromarray(
         tile_raster_images(X=(z.eval() * 500),
                            img_shape=(28, 28), tile_shape=(10, 10),
                            tile_spacing=(1, 1)))
-    image.save(filename + '_' + letter + '_predict' + '_predict.png')
+    image.save(dataClass + '_' + letter + '_predict.png')
 
 
 if __name__ == '__main__':
+
+    print('************** Building autoencoder for A : ')
     test_dA()
+    print('************** Building autoencoder for B : ')
     test_dA(letter ='B')
+
+    #add gaussian noise
+    print('**************add gaussian noise : ')
+    test_dA(noise = 'gaussian')
+
+
+    #plot costs of different hidden layer size
+    print('************train for different hidden layer size: ')
+    costs = []
+    interval = 50
+    start_size = 400
+    end_size = 900
+    for i in range(start_size, end_size, interval):
+        print(i)
+        costs.append(test_dA(training_epochs = 15, hiddensize = i,draw_pic_switch=False))
+        print(costs)
+
+    c = numpy.array(costs)
+    plt.figure(0)
+    xaxis = numpy.arange(start_size, end_size, interval)
+    plt.plot(xaxis, c[:, 0])
+    plt.plot(xaxis, c[:, 1])
+    title = ' Costs of diffent hidden layer size '
+    plt.title(title)
+    plt.ylabel(" Reconstruction Cost")
+    plt.xlabel(" hidden layer size ")
+
+    plt.show()

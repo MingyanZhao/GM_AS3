@@ -252,10 +252,6 @@ def load_data(dataset, letter):
     valid_set = flattenData(valid_set_matrix)
     test_set = flattenData(test_set_matix)
 
-    print(train_set.shape)
-    print(valid_set.shape)
-    print(test_set.shape)
-
     def shared_dataset(data_xy, borrow=True):
         """ Function that loads the dataset into shared variables
 
