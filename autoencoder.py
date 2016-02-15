@@ -273,6 +273,12 @@ class dA(object):
         return (cost, updates)
 
 
+
+
+def calcost(input, output):
+    L = - (1/(input.shape[0])) * numpy.sum(input * numpy.log(output) + (1 - input) * numpy.log(1 - output))
+    return L
+
 def test_dA(learning_rate=0.1, training_epochs=15,
             letter = 'A',
             batch_size=20, output_folder='dA_plots', hiddensize = 500, draw_pic_switch = True, noise = 'zero'):
@@ -382,6 +388,7 @@ def test_dA(learning_rate=0.1, training_epochs=15,
         drawimg(da, train_set_x, 'train', filetile)
 
         valid_x, valid_y = datasets[1]
+
         drawimg(da, valid_x, 'valid', filetile)
 
         test_x, test_y = datasets[2]
@@ -476,11 +483,17 @@ def drawimg(da, set, dataClass, letter):
     y = da.get_hidden_values(set.get_value(borrow=True))
     z = da.get_reconstructed_input(y)
 
+    error = calcost(numpy.array(set.get_value(borrow=True)), numpy.array(z.eval()))
+
+    print(letter + '_' + dataClass + ' loss  = ' + str(error))
+
     image = Image.fromarray(
         tile_raster_images(X=(set.get_value(borrow=True) * 500),
                            img_shape=(28, 28), tile_shape=(10, 10),
                            tile_spacing=(1, 1)))
     image.save(dataClass + '_' + letter + '.png')
+
+
     image = Image.fromarray(
         tile_raster_images(X=(z.eval() * 500),
                            img_shape=(28, 28), tile_shape=(10, 10),
